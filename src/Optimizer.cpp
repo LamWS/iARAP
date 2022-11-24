@@ -3,6 +3,7 @@
 #include "parameters.h"
 #include "fstream"
 #include "cfloat"
+#include "IPC.h"
 #include <iostream>
 
 Optimizer::Optimizer(Mesh &mesh) {
@@ -88,8 +89,9 @@ void Optimizer::compute_F(Mesh &mesh) {
 }
 
 void Optimizer::solve(Mesh &mesh, double dt, int total_frames) {
-    pos_prev = mesh.pos;
     for (int frame = 0; frame < total_frames; frame++) {
+        g.calculateActivateSet(mesh, ground_ActiveSet, IPC::d_hat);
+        pos_prev = mesh.pos;
         lastEnergyVal = compute_energy(mesh, dt);
         int k = 0;
         int iterCap = 10000;
@@ -127,7 +129,7 @@ void Optimizer::solve(Mesh &mesh, double dt, int total_frames) {
                 }
             }
 #endif
-            std::cout << "dist_to_converge" << std::endl;
+            std::cout << "dist_to_converge:";
             std::cout << dist_to_converge << std::endl;
             double bboxDiagSize2 = (mesh.get_maxCorner() - mesh.get_minCorner()).squaredNorm();
             bool gradVanish = (dist_to_converge < sqrt(1e-6 * bboxDiagSize2 * dt * dt));
@@ -135,6 +137,10 @@ void Optimizer::solve(Mesh &mesh, double dt, int total_frames) {
                 break;
             }
             double step_size = 1;
+
+            get_ground_largestFeasibleStepSize(mesh, direction, 0.9, step_size);
+            std::cout << "step_size:" << step_size << std::endl;
+
             line_search(mesh, dt, direction, step_size);
         }
         for (int i = 0; i < mesh.pos.size(); i++) {
@@ -146,12 +152,11 @@ void Optimizer::solve(Mesh &mesh, double dt, int total_frames) {
 }
 
 void Optimizer::compute_gradient_Hessian(Mesh &mesh, double dt, std::vector<Vector3d> &gradient, BHessian &BH) {
-    compute_F(mesh);;
+    compute_F(mesh);
     Matrix3d massIdentity;
     massIdentity.setIdentity();
     gradient.resize(mesh.pos.size(), Eigen::Vector3d::Zero());
 
-#ifndef NoSimulation
 #ifdef TEST_USE_TBB
     tbb::parallel_for(0, vertices_cnt, 1, [&](int vI)
 #else
@@ -173,7 +178,6 @@ void Optimizer::compute_gradient_Hessian(Mesh &mesh, double dt, std::vector<Vect
 #ifdef TEST_USE_TBB
     );
 #endif
-#endif
     //internal part
     double fsum = 0;
 
@@ -191,7 +195,8 @@ void Optimizer::compute_gradient_Hessian(Mesh &mesh, double dt, std::vector<Vect
         gradient_vec[ii] =
                 dt * dt * FEM::mu * mesh.volume[ii] * tet_dfdx[ii].transpose() * compute_ARAP_gradient(tet_F[ii]);
         BH.H12x12[ii] =
-                dt * dt * mesh.volume[ii] * tet_dfdx[ii].transpose() * compute_ARAP_Hessian(tet_F[ii]) * tet_dfdx[ii];
+                dt * dt * FEM::mu * mesh.volume[ii] * tet_dfdx[ii].transpose() * compute_ARAP_Hessian(tet_F[ii]) *
+                tet_dfdx[ii];
     }
 #ifdef TEST_USE_TBB
     );
@@ -206,10 +211,49 @@ void Optimizer::compute_gradient_Hessian(Mesh &mesh, double dt, std::vector<Vect
             gradient[tet.w()][i] += gradient_vec[tetIndex](i + 9);
         }
     }
+    //collision part
+    VectorXd constraintVals;//, g_b;
+    int offset = 0;//constraintVals.size();
+    evaluate_GroundConstraintVals(mesh, constraintVals, offset);
+    Matrix3d nnT = g.normal * g.normal.transpose();
+    //g_b.resize(constraintVals.size());
+    //H_b.resize(constraintVals.size());
+#ifdef TEST_USE_TBB
+    tbb::spin_mutex Mutex;
+    tbb::parallel_for(0, (int) constraintVals.size(), 1, [&](int cI)
+#else
+    for (int cI = offset; cI < constraintVals.size(); ++cI)
+#endif
+    {
+        double g_b, H_b;
+        IPC::compute_g_b(constraintVals[cI], IPC::d_hat, g_b);
+        IPC::compute_H_b(constraintVals[cI], IPC::d_hat, H_b);
+        int vI = ground_ActiveSet[cI];
+        double dist = g.normal.dot(mesh.pos[vI]) - g.D;
+        gradient[vI] += IPC::Kappa * g_b * 2.0 * dist * g.normal;
+        std::cout << "g_b:" << IPC::Kappa * g_b * 2.0 * dist * g.normal.transpose() << std::endl;
+        double param = 4.0 * H_b * constraintVals[cI] + 2.0 * g_b;
+        if (param > 0) {
+            Matrix3d Hpg = IPC::Kappa * param * nnT;
+#ifdef TEST_USE_TBB
+            Mutex.lock();
+                              BH.H3x3.push_back(Hpg);
+                              BH.D1Index.push_back(vI);
+                              Mutex.unlock();
+#else
+            BH.H3x3.push_back(Hpg);
+            BH.D1Index.push_back(vI);
+#endif
+
+        }
+    }
+#ifdef TEST_USE_TBB
+    );
+#endif
 }
 
 Eigen::Vector3d Optimizer::get_external_force(Mesh &mesh, int i, double dt) {
-    return Vector3d(0, 0 * mesh.mass[i], 0);
+    return Vector3d(0, -9.8 * mesh.mass[i], 0);
 }
 
 void Optimizer::calculateMovingDirection(Mesh &mesh, BHessian &BH, std::vector<Eigen::Vector3d> gradient,
@@ -294,8 +338,7 @@ void Optimizer::line_search(Mesh &mesh, double dt, std::vector<Eigen::Vector3d> 
     double testingE;
 
 
-//    buildCollisionSets();
-
+    g.calculateActivateSet(mesh, ground_ActiveSet, IPC::d_hat);
     testingE = compute_energy(mesh, dt);
     int numOfLineSearch = 0;
     double LFStepSize = step;
@@ -309,10 +352,11 @@ void Optimizer::line_search(Mesh &mesh, double dt, std::vector<Eigen::Vector3d> 
         }
         step_forward(mesh, resultV0, direction, step);
         step /= 2.0;
-//        buildCollisionSets();
+
+        g.calculateActivateSet(mesh, ground_ActiveSet, IPC::d_hat);
         testingE = compute_energy(mesh, dt);
-//        std::cout << "step during line search:" << std::endl;
-//        std::cout << step << std::endl;
+        std::cout << "step during line search:";
+        std::cout << step << std::endl;
 
     }
     lastEnergyVal = testingE;
@@ -322,7 +366,7 @@ double Optimizer::compute_energy(Mesh &mesh, double dt) {
     compute_F(mesh);
     double energyVal = 0;
     for (int i = 0; i < mesh.tets.size(); i++) {
-        energyVal += dt * dt * compute_ARAP_energy(tet_F[i]);
+        energyVal += dt * dt * FEM::mu * mesh.volume[i] * compute_ARAP_energy(tet_F[i]);
     }
     double deltaE = 0;
     Eigen::Matrix3d identity = Eigen::Matrix3d::Identity();
@@ -336,6 +380,25 @@ double Optimizer::compute_energy(Mesh &mesh, double dt) {
         deltaE += tep;
     }
     energyVal += deltaE;
+
+
+    Eigen::VectorXd constraintVals, bVals;
+    int startCI = constraintVals.size();
+    evaluate_GroundConstraintVals(mesh, constraintVals, startCI);
+    bVals.conservativeResize(constraintVals.size());
+//    std::cout << "constraintVals[cI]" << std::endl;
+    for (int cI = startCI; cI < constraintVals.size(); ++cI) {
+        if (constraintVals[cI] <= 0.0) {
+            exit(0);
+        } else {
+//            std::cout << constraintVals[cI] << std::endl;
+            IPC::compute_b(constraintVals[cI], IPC::d_hat, bVals[cI]);
+        }
+    }
+    energyVal += IPC::Kappa * bVals.sum();
+    std::cout << "barrier energyVal:" << std::endl;
+    std::cout << IPC::Kappa * bVals.sum() << std::endl;
+
     return energyVal;
 }
 
@@ -366,3 +429,50 @@ void Optimizer::export_obj(Mesh &mesh, int frame) {
     cloth_stream.close();
 }
 
+void Optimizer::evaluate_GroundConstraintVals(Mesh &mesh, VectorXd &vals, const int &offset) {
+    int number = ground_ActiveSet.size();
+    vals.conservativeResize(number + offset);
+
+#ifdef TEST_USE_TBB
+    tbb::parallel_for(0, number, 1, [&](int i)
+#else
+    for (int i = 0; i < number; i++)
+#endif
+    {
+        vals[i + offset] = g.calculateGapFromObj(mesh, ground_ActiveSet[i]);
+    }
+#ifdef TEST_USE_TBB
+    );
+#endif
+}
+
+
+void Optimizer::get_ground_largestFeasibleStepSize(Mesh &mesh,
+                                                   const std::vector<Eigen::Vector3d> &searchDir,
+                                                   double slackness,
+                                                   double &stepSize) {
+    Eigen::VectorXd maxStepSizes(mesh.pos.size());
+
+#ifdef USE_TBB
+    tbb::parallel_for(0, (int)mesh.surfVerts.size(), 1, [&](int svI)
+#else
+    for (int svI = 0; svI < mesh.pos.size(); ++svI)
+#endif
+    {
+        maxStepSizes[svI] = 1.0;
+        int vI = svI;
+
+        double coef = g.normal.dot(-searchDir[vI]);
+        if (coef < 0.0) { // if going towards the halfSpace
+            double dist = g.normal.transpose().dot(mesh.pos[vI]) - g.D;
+//            std::cout << "dist: " << dist << std::endl;
+            maxStepSizes[svI] = -dist / coef * slackness;
+//            std::cout << "maxstepsize: " << maxStepSizes[svI] << std::endl;
+        }
+
+    }
+#ifdef USE_TBB
+    );
+#endif
+    stepSize = std::min(stepSize, maxStepSizes.minCoeff());
+}

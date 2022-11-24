@@ -129,6 +129,7 @@ double compute_ARAP_energy(const Matrix3d &F) {
 //        std::cout << a << " " << b << " " << c << " " << d << std::endl;
     std::complex<double> *solutions = solve_quartic(a, b, c, d);
     double f = solutions[2].real();
+    delete[] solutions;
     return 0.5 * (i1 - 2 * f + 3);
 }
 
