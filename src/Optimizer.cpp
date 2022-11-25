@@ -132,15 +132,6 @@ void Optimizer::solve(Mesh &mesh, double dt, int total_frames) {
                     }
                 }
 #endif
-                std::cout << "moveDir:" << std::endl;
-                for (int i = 0; i < 3; i++) {
-                    for (auto dir: direction) {
-                        std::cout << -dir[i] << " ";
-                    }
-                    std::cout << std::endl;
-                }
-                std::cout << "dist_to_converge:";
-                std::cout << dist_to_converge << std::endl;
                 double bboxDiagSize2 = (mesh.get_maxCorner() - mesh.get_minCorner()).squaredNorm();
                 bool gradVanish = (dist_to_converge < sqrt(1e-6 * bboxDiagSize2 * dt * dt));
                 if (k && gradVanish) {
@@ -149,7 +140,7 @@ void Optimizer::solve(Mesh &mesh, double dt, int total_frames) {
                 double step_size = 1;
 
                 get_ground_largestFeasibleStepSize(mesh, direction, 0.9, step_size);
-                std::cout << "step_size:" << step_size << std::endl;
+//                std::cout << "step_size:" << step_size << std::endl;
 
                 line_search(mesh, dt, direction, step_size);
             }
@@ -217,10 +208,10 @@ void Optimizer::compute_gradient_Hessian(Mesh &mesh, double dt, std::vector<Vect
     {
 
         gradient_vec[ii] =
-                dt * dt * FEM::mu * FEM::density * mesh.volume[ii] * tet_dfdx[ii].transpose() *
+                dt * dt * FEM::mu * mesh.volume[ii] * tet_dfdx[ii].transpose() *
                 compute_ARAP_gradient(tet_F[ii]);
         BH.H12x12[ii] =
-                dt * dt * FEM::mu * FEM::density * mesh.volume[ii] * tet_dfdx[ii].transpose() *
+                dt * dt * FEM::mu * mesh.volume[ii] * tet_dfdx[ii].transpose() *
                 compute_ARAP_Hessian(tet_F[ii]) *
                 tet_dfdx[ii];
     }
@@ -365,8 +356,6 @@ void Optimizer::line_search(Mesh &mesh, double dt, std::vector<Eigen::Vector3d> 
 
         g.calculateActivateSet(mesh, ground_ActiveSet, IPC::d_hat);
         testingE = compute_energy(mesh, dt);
-        std::cout << "step during line search:";
-        std::cout << step << std::endl;
 
     }
     lastEnergyVal = testingE;
@@ -376,7 +365,7 @@ double Optimizer::compute_energy(Mesh &mesh, double dt) {
     compute_F(mesh);
     double energyVal = 0;
     for (int i = 0; i < mesh.tets.size(); i++) {
-        energyVal += dt * dt * FEM::mu * FEM::density * mesh.volume[i] * compute_ARAP_energy(tet_F[i]);
+        energyVal += dt * dt * FEM::mu * mesh.volume[i] * compute_ARAP_energy(tet_F[i]);
     }
     double deltaE = 0;
     Eigen::Matrix3d identity = Eigen::Matrix3d::Identity();
@@ -396,18 +385,14 @@ double Optimizer::compute_energy(Mesh &mesh, double dt) {
     int startCI = constraintVals.size();
     evaluate_GroundConstraintVals(mesh, constraintVals, startCI);
     bVals.conservativeResize(constraintVals.size());
-//    std::cout << "constraintVals[cI]" << std::endl;
     for (int cI = startCI; cI < constraintVals.size(); ++cI) {
         if (constraintVals[cI] <= 0.0) {
             exit(0);
         } else {
-//            std::cout << constraintVals[cI] << std::endl;
             IPC::compute_b(constraintVals[cI], IPC::d_hat, bVals[cI]);
         }
     }
     energyVal += IPC::Kappa * bVals.sum();
-    std::cout << "barrier energyVal:" << std::endl;
-    std::cout << IPC::Kappa * bVals.sum() << std::endl;
 
     return energyVal;
 }
@@ -475,9 +460,7 @@ void Optimizer::get_ground_largestFeasibleStepSize(Mesh &mesh,
         double coef = g.normal.dot(-searchDir[vI]);
         if (coef < 0.0) { // if going towards the halfSpace
             double dist = g.normal.transpose().dot(mesh.pos[vI]) - g.D;
-//            std::cout << "dist: " << dist << std::endl;
             maxStepSizes[svI] = -dist / coef * slackness;
-//            std::cout << "maxstepsize: " << maxStepSizes[svI] << std::endl;
         }
 
     }

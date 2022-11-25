@@ -3,6 +3,7 @@
 #include <map>
 
 #include "mesh.h"
+#include "parameters.h"
 
 using namespace Eigen;
 
@@ -222,23 +223,16 @@ bool Mesh::read_tetramesh(const std::string &filename) {
     std::vector<double> adj_volume;
     adj_v.resize(pos.size(), 0);
     adj_volume.resize(pos.size(), 0);
+    double sum = 0;
+    mass.resize(pos.size(), 0);
     for (auto tet: tets) {
         double v = calculateVolum(res_pos[tet[0]], res_pos[tet[1]], res_pos[tet[2]], res_pos[tet[3]]);
         volume.emplace_back(v);
-        adj_v[tet[0]] += 1;
-        adj_v[tet[1]] += 1;
-        adj_v[tet[2]] += 1;
-        adj_v[tet[3]] += 1;
-
-        adj_volume[tet[0]] += v;
-        adj_volume[tet[1]] += v;
-        adj_volume[tet[2]] += v;
-        adj_volume[tet[3]] += v;
-    }
-    double sum = 0;
-    for (int i = 0; i < pos.size(); i++) {
-        mass.emplace_back(1);
-        sum += 1;
+        mass[tet[0]] += v * FEM::density / 4;
+        mass[tet[1]] += v * FEM::density / 4;
+        mass[tet[2]] += v * FEM::density / 4;
+        mass[tet[3]] += v * FEM::density / 4;
+        sum += v * FEM::density;
     }
     meanMass = sum / pos.size();
 }
