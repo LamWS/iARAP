@@ -79,7 +79,7 @@ bool Mesh::read_tetramesh(const std::string &filename) {
                 z = atof(nodePos[3].c_str());
                 Vector3d d_velocity = Vector3d(0, 0, 0);
                 Vector3d vertex = Vector3d(x, y, z);
-                Vector3d compress_vertex = Vector3d(x,  y, z);
+                Vector3d compress_vertex = Vector3d(x, y, z);
 //                if (y > 0.156) {
 //                    compress_vertex.y() += (compress_vertex.y() - 0.156) * 2;
 //                }
@@ -237,8 +237,8 @@ bool Mesh::read_tetramesh(const std::string &filename) {
     }
     double sum = 0;
     for (int i = 0; i < pos.size(); i++) {
-        mass.emplace_back(adj_v[i]);
-        sum += adj_v[i];
+        mass.emplace_back(1);
+        sum += 1;
     }
     meanMass = sum / pos.size();
 }

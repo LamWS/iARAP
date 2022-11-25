@@ -3,7 +3,7 @@
 #include "Ground.h"
 
 Ground::Ground() {
-    init(Vector3d(0, 1, 0), -1.5);
+    init(Vector3d(0, 1, 0), -1);
 }
 
 void Ground::init(const Vector3d &m_normal, const double &d) {

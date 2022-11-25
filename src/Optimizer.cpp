@@ -90,58 +90,86 @@ void Optimizer::compute_F(Mesh &mesh) {
 
 void Optimizer::solve(Mesh &mesh, double dt, int total_frames) {
     for (int frame = 0; frame < total_frames; frame++) {
-        g.calculateActivateSet(mesh, ground_ActiveSet, IPC::d_hat);
-        pos_prev = mesh.pos;
-        lastEnergyVal = compute_energy(mesh, dt);
-        int k = 0;
-        int iterCap = 10000;
-        for (; k < iterCap; ++k) {
-            std::vector<Vector3d> gradient(mesh.pos.size(), Vector3d(0, 0, 0));
-            BHessian BH;
-            compute_gradient_Hessian(mesh, dt, gradient, BH);
-            std::vector<Eigen::Vector3d> direction(mesh.pos.size(), Vector3d(0, 0, 0));
+        double bboxDiagSize2 = (mesh.get_maxCorner() - mesh.get_minCorner()).squaredNorm();
+        double dTol = 1e-18 * bboxDiagSize2;
+        while (true) {
+            g.calculateActivateSet(mesh, ground_ActiveSet, IPC::d_hat);
+            pos_prev = mesh.pos;
+            lastEnergyVal = compute_energy(mesh, dt);
+            int k = 0;
+            int iterCap = 10000;
+            for (; k < iterCap; ++k) {
+                std::vector<Vector3d> gradient(mesh.pos.size(), Vector3d(0, 0, 0));
+                BHessian BH;
+                compute_gradient_Hessian(mesh, dt, gradient, BH);
+                std::vector<Eigen::Vector3d> direction(mesh.pos.size(), Vector3d(0, 0, 0));
 
-            calculateMovingDirection(mesh, BH, gradient, direction);
-            double dist_to_converge = 0;
+                calculateMovingDirection(mesh, BH, gradient, direction);
+                double dist_to_converge = 0;
 #ifdef TEST_USE_TBB
-            distToOpt_PN = parallel_reduce(
-                tbb::blocked_range<int>(0, (int) direction.size()), 0.0,
-                [&](const tbb::blocked_range<int> &rg, double temp_max) {
-                    for (int i = rg.begin(); i != rg.end(); i++) {
-                        for (int jj = 0; jj < 3; jj++) {
-                            if (temp_max < abs(direction[i][jj])) {
-                                temp_max = abs(direction[i][jj]);
+                distToOpt_PN = parallel_reduce(
+                    tbb::blocked_range<int>(0, (int) direction.size()), 0.0,
+                    [&](const tbb::blocked_range<int> &rg, double temp_max) {
+                        for (int i = rg.begin(); i != rg.end(); i++) {
+                            for (int jj = 0; jj < 3; jj++) {
+                                if (temp_max < abs(direction[i][jj])) {
+                                    temp_max = abs(direction[i][jj]);
+                                }
                             }
                         }
+                        return temp_max;
+                    },
+                    [&](double left, double right) {
+                        return left > right ? left : right;
                     }
-                    return temp_max;
-                },
-                [&](double left, double right) {
-                    return left > right ? left : right;
-                }
-        );
+            );
 #else
-            for (int ii = 0; ii < direction.size(); ii++) {
-                for (int jj = 0; jj < 3; jj++) {
-                    if (dist_to_converge < abs(direction[ii][jj])) {
-                        dist_to_converge = abs(direction[ii][jj]);
+                for (int ii = 0; ii < direction.size(); ii++) {
+                    for (int jj = 0; jj < 3; jj++) {
+                        if (dist_to_converge < abs(direction[ii][jj])) {
+                            dist_to_converge = abs(direction[ii][jj]);
+                        }
                     }
                 }
-            }
 #endif
-            std::cout << "dist_to_converge:";
-            std::cout << dist_to_converge << std::endl;
-            double bboxDiagSize2 = (mesh.get_maxCorner() - mesh.get_minCorner()).squaredNorm();
-            bool gradVanish = (dist_to_converge < sqrt(1e-6 * bboxDiagSize2 * dt * dt));
-            if (k && gradVanish) {
+                std::cout << "moveDir:" << std::endl;
+                for (int i = 0; i < 3; i++) {
+                    for (auto dir: direction) {
+                        std::cout << -dir[i] << " ";
+                    }
+                    std::cout << std::endl;
+                }
+                std::cout << "dist_to_converge:";
+                std::cout << dist_to_converge << std::endl;
+                double bboxDiagSize2 = (mesh.get_maxCorner() - mesh.get_minCorner()).squaredNorm();
+                bool gradVanish = (dist_to_converge < sqrt(1e-6 * bboxDiagSize2 * dt * dt));
+                if (k && gradVanish) {
+                    break;
+                }
+                double step_size = 1;
+
+                get_ground_largestFeasibleStepSize(mesh, direction, 0.9, step_size);
+                std::cout << "step_size:" << step_size << std::endl;
+
+                line_search(mesh, dt, direction, step_size);
+            }
+
+            VectorXd constraintVals;
+            int offset = 0;//constraintVals.size();
+            evaluate_GroundConstraintVals(mesh, constraintVals, offset);
+            offset = constraintVals.size();
+            if (constraintVals.size()) {
+                double minm = constraintVals.minCoeff();
+                double maxm = constraintVals.maxCoeff();
+//            cout << minm << "    " << maxm << endl;
+                if (constraintVals.minCoeff() < dTol) {
+                    break;
+                } else if (constraintVals.maxCoeff() < IPC::d_hat) {
+                    break;
+                }
+            } else {
                 break;
             }
-            double step_size = 1;
-
-            get_ground_largestFeasibleStepSize(mesh, direction, 0.9, step_size);
-            std::cout << "step_size:" << step_size << std::endl;
-
-            line_search(mesh, dt, direction, step_size);
         }
         for (int i = 0; i < mesh.pos.size(); i++) {
             mesh.velocities[i] = (mesh.pos[i] - pos_prev[i]) / dt;
@@ -170,10 +198,6 @@ void Optimizer::compute_gradient_Hessian(Mesh &mesh, double dt, std::vector<Vect
         auto tmp = (mesh.mass[vI] * massIdentity *
                     (x - (xt + dt * v + dt * dt * (1 / mesh.mass[vI]) * massIdentity * fe)));
         gradient[vI] += tmp;
-        // damping
-//        if (FEM::damping > 0.0) {
-//            gradient[vI] += FEM::damping * mesh.mass[vI] * massIdentity * (x - xt) * dt;
-//        }
     }
 #ifdef TEST_USE_TBB
     );
@@ -193,9 +217,11 @@ void Optimizer::compute_gradient_Hessian(Mesh &mesh, double dt, std::vector<Vect
     {
 
         gradient_vec[ii] =
-                dt * dt * FEM::mu * mesh.volume[ii] * tet_dfdx[ii].transpose() * compute_ARAP_gradient(tet_F[ii]);
+                dt * dt * FEM::mu * FEM::density * mesh.volume[ii] * tet_dfdx[ii].transpose() *
+                compute_ARAP_gradient(tet_F[ii]);
         BH.H12x12[ii] =
-                dt * dt * FEM::mu * mesh.volume[ii] * tet_dfdx[ii].transpose() * compute_ARAP_Hessian(tet_F[ii]) *
+                dt * dt * FEM::mu * FEM::density * mesh.volume[ii] * tet_dfdx[ii].transpose() *
+                compute_ARAP_Hessian(tet_F[ii]) *
                 tet_dfdx[ii];
     }
 #ifdef TEST_USE_TBB
@@ -231,7 +257,7 @@ void Optimizer::compute_gradient_Hessian(Mesh &mesh, double dt, std::vector<Vect
         int vI = ground_ActiveSet[cI];
         double dist = g.normal.dot(mesh.pos[vI]) - g.D;
         gradient[vI] += IPC::Kappa * g_b * 2.0 * dist * g.normal;
-        std::cout << "g_b:" << IPC::Kappa * g_b * 2.0 * dist * g.normal.transpose() << std::endl;
+//        std::cout << "g_b:" << IPC::Kappa * g_b * 2.0 * dist * g.normal.transpose() << std::endl;
         double param = 4.0 * H_b * constraintVals[cI] + 2.0 * g_b;
         if (param > 0) {
             Matrix3d Hpg = IPC::Kappa * param * nnT;
@@ -319,22 +345,6 @@ void Optimizer::line_search(Mesh &mesh, double dt, std::vector<Eigen::Vector3d> 
 
     std::vector<Eigen::Vector3d> resultV0 = mesh.pos;
     step_forward(mesh, resultV0, direction, step);
-
-    bool rehash = true;
-
-//    sh->build(object);
-//    std::cout << "step spatial hash:" << std::endl;
-//    while (isIntersected(resultV0)) {
-//        std::cout << "intersected" << std::endl;
-//        profile::ccd_error += 1;
-//        step /= 2.0;
-//        stepForward(resultV0, direction, step);
-//        sh->build(object);
-//    }
-//    std::cout << "step before line search:" << std::endl;
-//    std::cout << step << std::endl;
-    double alpha_before = step;
-    rehash = false;
     double testingE;
 
 
@@ -366,7 +376,7 @@ double Optimizer::compute_energy(Mesh &mesh, double dt) {
     compute_F(mesh);
     double energyVal = 0;
     for (int i = 0; i < mesh.tets.size(); i++) {
-        energyVal += dt * dt * FEM::mu * mesh.volume[i] * compute_ARAP_energy(tet_F[i]);
+        energyVal += dt * dt * FEM::mu * FEM::density * mesh.volume[i] * compute_ARAP_energy(tet_F[i]);
     }
     double deltaE = 0;
     Eigen::Matrix3d identity = Eigen::Matrix3d::Identity();
@@ -451,16 +461,16 @@ void Optimizer::get_ground_largestFeasibleStepSize(Mesh &mesh,
                                                    const std::vector<Eigen::Vector3d> &searchDir,
                                                    double slackness,
                                                    double &stepSize) {
-    Eigen::VectorXd maxStepSizes(mesh.pos.size());
+    Eigen::VectorXd maxStepSizes(mesh.surfVerts.size());
 
 #ifdef USE_TBB
     tbb::parallel_for(0, (int)mesh.surfVerts.size(), 1, [&](int svI)
 #else
-    for (int svI = 0; svI < mesh.pos.size(); ++svI)
+    for (int svI = 0; svI < mesh.surfVerts.size(); ++svI)
 #endif
     {
         maxStepSizes[svI] = 1.0;
-        int vI = svI;
+        int vI = mesh.surfVerts[svI];
 
         double coef = g.normal.dot(-searchDir[vI]);
         if (coef < 0.0) { // if going towards the halfSpace
