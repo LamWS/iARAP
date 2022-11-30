@@ -4,8 +4,13 @@ Paper Isotropic ARAP energy using Cauchy-Green invariants
 ![](https://github.com/LamWS/iARAP/raw/main/file/teaser.png)
 
 ## Abstract
-
-Many strategies exist for optimizing non-linear distortion energies in geometry and physics applications, but devising an approach that achieves the convergence promised by Newton-type methods remains challenging. In order to guarantee the positive semi-definiteness required by these methods, a numerical eigendecomposition or approximate regularization is usually needed. In this article, we present analytic expressions for the eigensystems at each quadrature point of a wide range of isotropic distortion energies. These systems can then be used to project energy Hessians to positive semi-definiteness analytically. Unlike previous attempts, our formulation provides compact expressions that are valid both in 2D and 3D, and does not introduce spurious degeneracies. At its core, our approach utilizes the invariants of the stretch tensor that arises from the polar decomposition of the deformation gradient. We provide closed-form expressions for the eigensystems for all these invariants, and use them to systematically derive the eigensystems of any isotropic energy. Our results are suitable for geometry optimization over flat surfaces or volumes, and agnostic to both the choice of discretization and basis function. To demonstrate the efficiency of our approach, we include comparisons against existing methods on common graphics tasks such as surface parameterization and volume deformation.
+Isotropic As-Rigid-As-Possible (ARAP) energy has been popular for shape editing, mesh parametrisation and soft-body simulation for almost two decades.
+However, a formulation using Cauchy-Green {(CG)} invariants has always been unclear, due to a rotation-polluted trace term that cannot be directly expressed using these invariants.
+We show how this incongruent trace term can be understood via an implicit relationship to the CG  invariants. % that strictly penalise stretch.
+Our analysis reveals this relationship to be a polynomial where the roots equate to the trace term, and where the derivatives also give rise to closed-form expressions of the Hessian to guarantee positive semi-definiteness for a fast and concise Newton-type implicit {time} integration.
+A consequence of this analysis is a novel analytical formulation to compute rotations and singular values of deformation-gradient tensors without explicit/numerical factorization which is significant, resulting in up-to 3.5$\times$ speedup and benefits energy function evaluation for reducing solver time.
+We validate our energy formulation by experiments and comparison, demonstrating that our resulting eigendecomposition using the CG invariants is equivalent to existing ARAP formulations.
+We thus reveal isotropic ARAP energy to be a member of the ``Cauchy-Green club'', meaning that it can indeed be defined using CG invariants and therefore that the closed-form expressions of the resulting Hessian are shared with other energies written in their terms.
 
 [Paper], [Video], and [Code] are now available.
 
