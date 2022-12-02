@@ -30,7 +30,7 @@ derivatives also give rise to closed-form expressions of the Hessian to guarante
 and concise Newton-type implicit time integration.
 A consequence of this analysis is a novel analytical formulation to compute rotations and singular values of
 deformation-gradient tensors without explicit/numerical factorization which is significant, resulting in up-to
-3.5$\times$ speedup and benefits energy function evaluation for reducing solver time.
+3.5x speedup and benefits energy function evaluation for reducing solver time.
 We validate our energy formulation by experiments and comparison, demonstrating that our resulting eigendecomposition
 using the CG invariants is equivalent to existing ARAP formulations.
 We thus reveal isotropic ARAP energy to be a member of the "Cauchy-Green club", meaning that it can indeed be defined
