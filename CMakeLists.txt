@@ -1,5 +1,17 @@
-cmake_minimum_required(VERSION 3.23)
+cmake_minimum_required(VERSION 3.16)
 project(arap)
+
+
+#mesh output directory
+set(output_dir output)
+
+set(output_path ${CMAKE_BINARY_DIR}/${output_dir})
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/${output_dir})
+configure_file(path_config.h.in path_config.h)
+
+
+set(CMAKE_CXX_FLAGS "-O3 -Wall -Wextra")
+
 # FetchContent added in CMake 3.11, downloads during the configure step
 include(FetchContent)
 # FetchContent_MakeAvailable was not added until CMake 3.14; use our shim
@@ -28,4 +40,5 @@ FetchContent_MakeAvailable(eigen)
 set(eigen_include_dir ${eigen_SOURCE_DIR})
 set(CMAKE_CXX_STANDARD 11)
 include_directories(include ${eigen_SOURCE_DIR})
+include_directories(${CMAKE_CURRENT_BINARY_DIR})
 add_executable(arap main.cpp src/Optimizer.cpp src/mesh.cpp include/common.h include/ARAP.h include/parameters.h src/quartic.cpp src/Ground.cpp include/Ground.h include/IPC.h)

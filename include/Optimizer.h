@@ -8,7 +8,7 @@
 
 class Optimizer {
 public:
-    Optimizer(Mesh &mesh);
+    Optimizer(Mesh &mesh, std::string output_path);
 
     void initialize_FEM(Mesh &mesh);
 
@@ -46,6 +46,7 @@ public:
     std::vector<int> ground_ActiveSet;
     double lastEnergyVal = 0;
     Ground g;
+    std::string output_path;
 
 };
 
