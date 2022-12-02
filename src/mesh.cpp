@@ -235,6 +235,7 @@ bool Mesh::read_tetramesh(const std::string &filename) {
         sum += v * FEM::density;
     }
     meanMass = sum / pos.size();
+    return true;
 }
 
 Eigen::Vector3d Mesh::get_maxCorner() {
