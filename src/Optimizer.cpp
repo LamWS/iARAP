@@ -1,10 +1,12 @@
+#include <iostream>
+#include <iomanip>
+#include <cfloat>
+
 #include "Optimizer.h"
 #include "ARAP.h"
 #include "parameters.h"
 #include "fstream"
-#include "cfloat"
 #include "IPC.h"
-#include <iostream>
 
 Optimizer::Optimizer(Mesh &mesh, std::string output_path) : output_path(output_path) {
     initialize_FEM(mesh);
