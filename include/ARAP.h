@@ -128,6 +128,12 @@ double compute_ARAP_energy(const Matrix3d &F) {
     double d = i1 * i1 - 2 * (i1 * i1 - i2);
 //        std::cout << a << " " << b << " " << c << " " << d << std::endl;
     std::complex<double> *solutions = solve_quartic(a, b, c, d);
+    // in this quartic solver, the solutions can be reduced to the singular values as follows:
+    // solutions[0] = s1 - s2 - s3
+    // solutions[1] = s2 - s1 - s3
+    // solutions[2] = s1 + s2 + s3
+    // solutions[3] = s3 - s1 - s2
+
     double f = solutions[2].real();
     delete[] solutions;
     return 0.5 * (i1 - 2 * f + 3);
@@ -185,6 +191,12 @@ Matrix<double, 9, 9> compute_ARAP_Hessian(const Matrix3d &F) {
     double sig2 = (x2 + x4) / 2;
     double sig3 = (x3 + x4) / 2;
     double f = solutions[2].real();
+    // in this quartic solver, the solutions can be reduced to the singular values as follows:
+    // solutions[0] = s1 - s2 - s3
+    // solutions[1] = s2 - s1 - s3
+    // solutions[2] = s1 + s2 + s3
+    // solutions[3] = s3 - s1 - s2
+
     delete[] solutions;
     if (sig1 > sig2) {
         std::swap(sig1, sig2);
